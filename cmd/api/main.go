@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 
+	"kasir-api/internal/config"
 	"kasir-api/internal/handler"
 	"kasir-api/internal/repository"
 	"kasir-api/internal/service"
@@ -13,7 +14,6 @@ import (
 
 	_ "kasir-api/docs" // Swagger docs
 
-	"github.com/joho/godotenv"
 	httpSwagger "github.com/swaggo/http-swagger"
 )
 
@@ -32,13 +32,21 @@ import (
 // @BasePath /
 
 func main() {
-	// Load .env
-	if err := godotenv.Load(); err != nil {
-		log.Println("No .env file found, using system environment variables")
+	// Load Config
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		log.Fatalf("Failed to load config: %v", err)
 	}
 
 	// Initialize Database
-	db, err := database.NewPostgres()
+	dbCfg := database.Config{
+		Host:     cfg.Database.Host,
+		Port:     cfg.Database.Port,
+		User:     cfg.Database.User,
+		Password: cfg.Database.Password,
+		Name:     cfg.Database.Name,
+	}
+	db, err := database.NewPostgres(dbCfg)
 	if err != nil {
 		log.Fatalf("Could not connect to database: %v", err)
 	}
