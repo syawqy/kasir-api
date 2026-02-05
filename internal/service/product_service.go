@@ -8,7 +8,7 @@ import (
 
 type ProductService interface {
 	Create(product model.Product) (model.Product, error)
-	GetAll() ([]model.Product, error)
+	GetAll(nameFilter string) ([]model.Product, error)
 	GetByID(id int) (model.Product, error)
 	Update(id int, product model.Product) (model.Product, error)
 	Delete(id int) error
@@ -40,8 +40,8 @@ func (s *productService) Create(product model.Product) (model.Product, error) {
 	return s.repo.Create(product)
 }
 
-func (s *productService) GetAll() ([]model.Product, error) {
-	return s.repo.GetAll()
+func (s *productService) GetAll(nameFilter string) ([]model.Product, error) {
+	return s.repo.GetAll(nameFilter)
 }
 
 func (s *productService) GetByID(id int) (model.Product, error) {

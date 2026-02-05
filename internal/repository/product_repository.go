@@ -7,7 +7,7 @@ import (
 
 type ProductRepository interface {
 	Create(product model.Product) (model.Product, error)
-	GetAll() ([]model.Product, error)
+	GetAll(nameFilter string) ([]model.Product, error)
 	GetByID(id int) (model.Product, error)
 	Update(id int, product model.Product) (model.Product, error)
 	Delete(id int) error
@@ -30,7 +30,7 @@ func (r *postgresProductRepository) Create(product model.Product) (model.Product
 	return product, nil
 }
 
-func (r *postgresProductRepository) GetAll() ([]model.Product, error) {
+func (r *postgresProductRepository) GetAll(nameFilter string) ([]model.Product, error) {
 	query := `
 		SELECT 
 			p.id, p.name, p.price, p.stock, p.category_id,
@@ -38,7 +38,12 @@ func (r *postgresProductRepository) GetAll() ([]model.Product, error) {
 		FROM products p
 		LEFT JOIN categories c ON p.category_id = c.id
 	`
-	rows, err := r.db.Query(query)
+	args := []interface{}{}
+	if nameFilter != "" {
+		query += " WHERE p.name ILIKE $1"
+		args = append(args, "%"+nameFilter+"%")
+	}
+	rows, err := r.db.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}

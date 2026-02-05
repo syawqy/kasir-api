@@ -61,14 +61,17 @@ func main() {
 	// Repositories
 	categoryRepo := repository.NewCategoryRepository(db)
 	productRepo := repository.NewProductRepository(db)
+	transactionRepo := repository.NewTransactionRepository(db)
 
 	// Services
 	categoryService := service.NewCategoryService(categoryRepo)
 	productService := service.NewProductService(productRepo, categoryRepo)
+	transactionService := service.NewTransactionService(transactionRepo)
 
 	// Handlers
 	categoryHandler := handler.NewCategoryHandler(categoryService)
 	productHandler := handler.NewProductHandler(productService)
+	transactionHandler := handler.NewTransactionHandler(transactionService)
 
 	// Route Registration
 	mux := http.NewServeMux()
@@ -83,6 +86,13 @@ func main() {
 	// Products
 	mux.HandleFunc("/products", productHandler.HandleProducts)
 	mux.HandleFunc("/products/", productHandler.HandleProductByID)
+
+	// Transactions
+	mux.HandleFunc("/checkout", transactionHandler.HandleCheckout)
+
+	// Reports
+	mux.HandleFunc("/report", transactionHandler.HandleReport)
+	mux.HandleFunc("/report/", transactionHandler.HandleReport)
 
 	fmt.Println("Server starting on port 8080...")
 	fmt.Println("Swagger UI available at http://localhost:8080/swagger/index.html")
@@ -108,12 +118,36 @@ func runMigrations(db *sql.DB) error {
 		category_id INT REFERENCES categories(id)
 	);`
 
+	createTransactionsTable := `
+	CREATE TABLE IF NOT EXISTS transactions (
+		id SERIAL PRIMARY KEY,
+		total_amount INT NOT NULL,
+		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+	);`
+
+	createTransactionDetailsTable := `
+	CREATE TABLE IF NOT EXISTS transaction_details (
+		id SERIAL PRIMARY KEY,
+		transaction_id INT REFERENCES transactions(id) ON DELETE CASCADE,
+		product_id INT REFERENCES products(id),
+		quantity INT NOT NULL,
+		subtotal INT NOT NULL
+	);`
+
 	if _, err := db.Exec(createCategoriesTable); err != nil {
 		return fmt.Errorf("error creating categories table: %w", err)
 	}
 
 	if _, err := db.Exec(createProductsTable); err != nil {
 		return fmt.Errorf("error creating products table: %w", err)
+	}
+
+	if _, err := db.Exec(createTransactionsTable); err != nil {
+		return fmt.Errorf("error creating transactions table: %w", err)
+	}
+
+	if _, err := db.Exec(createTransactionDetailsTable); err != nil {
+		return fmt.Errorf("error creating transaction_details table: %w", err)
 	}
 
 	return nil

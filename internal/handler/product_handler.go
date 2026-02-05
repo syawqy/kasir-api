@@ -59,14 +59,16 @@ func (h *ProductHandler) HandleProductByID(w http.ResponseWriter, r *http.Reques
 
 // getAll godoc
 // @Summary Get all products
-// @Description Get all products with their category information
+// @Description Get all products with their category information. Optional filter by name using query parameter.
 // @Tags products
 // @Produce json
+// @Param name query string false "Filter products by name (partial match, case-insensitive)"
 // @Success 200 {array} model.Product
 // @Failure 500 {object} map[string]string
 // @Router /products [get]
 func (h *ProductHandler) getAll(w http.ResponseWriter, r *http.Request) {
-	products, err := h.service.GetAll()
+	name := r.URL.Query().Get("name")
+	products, err := h.service.GetAll(name)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
