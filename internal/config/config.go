@@ -20,7 +20,9 @@ type DatabaseConfig struct {
 }
 
 func LoadConfig() (*Config, error) {
-	viper.SetConfigFile(".env")
+	viper.SetConfigName(".env")
+	viper.SetConfigType("env")
+	viper.AddConfigPath(".")
 	viper.AutomaticEnv()
 
 	// Replace dot separators with underscores for env vars if we were using nested keys like "database.host"
@@ -28,10 +30,10 @@ func LoadConfig() (*Config, error) {
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 
 	if err := viper.ReadInConfig(); err != nil {
+		// Allow missing config file - env vars will be used instead
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
 			return nil, fmt.Errorf("failed to read config file: %w", err)
 		}
-		// If file not found, we rely on env vars
 	}
 
 	var config Config
