@@ -9,6 +9,20 @@ definitions:
       name:
         type: string
     type: object
+  model.CheckoutItem:
+    properties:
+      product_id:
+        type: integer
+      quantity:
+        type: integer
+    type: object
+  model.CheckoutRequest:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/model.CheckoutItem'
+        type: array
+    type: object
   model.Product:
     properties:
       category:
@@ -22,6 +36,50 @@ definitions:
       price:
         type: integer
       stock:
+        type: integer
+    type: object
+  model.Transaction:
+    properties:
+      created_at:
+        type: string
+      details:
+        items:
+          $ref: '#/definitions/model.TransactionDetail'
+        type: array
+      id:
+        type: integer
+      total_amount:
+        type: integer
+    type: object
+  model.TransactionDetail:
+    properties:
+      id:
+        type: integer
+      product_id:
+        type: integer
+      product_name:
+        type: string
+      quantity:
+        type: integer
+      subtotal:
+        type: integer
+      transaction_id:
+        type: integer
+    type: object
+  repository.ProdukTerlaris:
+    properties:
+      nama:
+        type: string
+      qty_terjual:
+        type: integer
+    type: object
+  repository.SalesReport:
+    properties:
+      produk_terlaris:
+        $ref: '#/definitions/repository.ProdukTerlaris'
+      total_revenue:
+        type: integer
+      total_transaksi:
         type: integer
     type: object
 host: localhost:8080
@@ -168,9 +226,50 @@ paths:
       summary: Update a category
       tags:
       - categories
+  /checkout:
+    post:
+      consumes:
+      - application/json
+      description: Create a new transaction with multiple items, calculate total,
+        update stock
+      parameters:
+      - description: Checkout items
+        in: body
+        name: items
+        required: true
+        schema:
+          $ref: '#/definitions/model.CheckoutRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/model.Transaction'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Process checkout/transaction
+      tags:
+      - transactions
   /products:
     get:
-      description: Get all products with their category information
+      description: Get all products with their category information. Optional filter
+        by name using query parameter.
+      parameters:
+      - description: Filter products by name (partial match, case-insensitive)
+        in: query
+        name: name
+        type: string
       produces:
       - application/json
       responses:
@@ -299,4 +398,33 @@ paths:
       summary: Update a product
       tags:
       - products
+  /report:
+    get:
+      description: Get sales report for a date range. Use /report/hari-ini for today's
+        report.
+      parameters:
+      - description: Start date (YYYY-MM-DD)
+        in: query
+        name: start_date
+        type: string
+      - description: End date (YYYY-MM-DD)
+        in: query
+        name: end_date
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/repository.SalesReport'
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get sales report
+      tags:
+      - reports
 swagger: "2.0"

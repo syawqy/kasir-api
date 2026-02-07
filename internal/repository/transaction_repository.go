@@ -4,6 +4,9 @@ import (
 	"database/sql"
 	"fmt"
 	"kasir-api/internal/model"
+	"strings"
+
+	"github.com/lib/pq"
 )
 
 type SalesReport struct {
@@ -82,36 +85,99 @@ func (r *postgresTransactionRepository) CreateTransaction(items []model.Checkout
 	defer tx.Rollback()
 
 	totalAmount := 0
-	details := make([]model.TransactionDetail, 0)
+	details := make([]model.TransactionDetail, 0, len(items))
+
+	if len(items) == 0 {
+		var transactionID int
+		err = tx.QueryRow("INSERT INTO transactions (total_amount) VALUES ($1) RETURNING id", totalAmount).Scan(&transactionID)
+		if err != nil {
+			return nil, err
+		}
+
+		if err := tx.Commit(); err != nil {
+			return nil, err
+		}
+
+		return &model.Transaction{
+			ID:          transactionID,
+			TotalAmount: totalAmount,
+			Details:     details,
+		}, nil
+	}
+
+	type productRow struct {
+		ID    int
+		Name  string
+		Price int
+		Stock int
+	}
+
+	qtyByID := make(map[int]int, len(items))
+	uniqueIDs := make([]int, 0, len(items))
+	for _, item := range items {
+		if _, ok := qtyByID[item.ProductID]; !ok {
+			uniqueIDs = append(uniqueIDs, item.ProductID)
+		}
+		qtyByID[item.ProductID] += item.Quantity
+	}
+
+	rows, err := tx.Query("SELECT id, name, price, stock FROM products WHERE id = ANY($1::int[]) FOR UPDATE", pq.Array(uniqueIDs))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	products := make(map[int]productRow, len(uniqueIDs))
+	for rows.Next() {
+		var p productRow
+		if err := rows.Scan(&p.ID, &p.Name, &p.Price, &p.Stock); err != nil {
+			return nil, err
+		}
+		products[p.ID] = p
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
 
 	for _, item := range items {
-		var productPrice, stock int
-		var productName string
-
-		err := tx.QueryRow("SELECT name, price, stock FROM products WHERE id = $1", item.ProductID).Scan(&productName, &productPrice, &stock)
-		if err == sql.ErrNoRows {
+		if _, ok := products[item.ProductID]; !ok {
 			return nil, fmt.Errorf("product id %d not found", item.ProductID)
 		}
-		if err != nil {
-			return nil, err
-		}
+	}
 
-		// Check if stock is sufficient
-		if stock < item.Quantity {
-			return nil, fmt.Errorf("insufficient stock for product %s (available: %d, requested: %d)", productName, stock, item.Quantity)
+	for productID, qty := range qtyByID {
+		p := products[productID]
+		if p.Stock < qty {
+			return nil, fmt.Errorf("insufficient stock for product %s (available: %d, requested: %d)", p.Name, p.Stock, qty)
 		}
+	}
 
-		subtotal := productPrice * item.Quantity
+	updateArgs := make([]interface{}, 0, len(uniqueIDs)*2)
+	var updateQuery strings.Builder
+	updateQuery.WriteString("UPDATE products SET stock = stock - v.qty FROM (VALUES ")
+	argPos := 1
+	for i, productID := range uniqueIDs {
+		if i > 0 {
+			updateQuery.WriteString(",")
+		}
+		updateQuery.WriteString(fmt.Sprintf("($%d::int, $%d::int)", argPos, argPos+1))
+		updateArgs = append(updateArgs, productID, qtyByID[productID])
+		argPos += 2
+	}
+	updateQuery.WriteString(") AS v(id, qty) WHERE products.id = v.id")
+
+	_, err = tx.Exec(updateQuery.String(), updateArgs...)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, item := range items {
+		p := products[item.ProductID]
+		subtotal := p.Price * item.Quantity
 		totalAmount += subtotal
-
-		_, err = tx.Exec("UPDATE products SET stock = stock - $1 WHERE id = $2", item.Quantity, item.ProductID)
-		if err != nil {
-			return nil, err
-		}
-
 		details = append(details, model.TransactionDetail{
 			ProductID:   item.ProductID,
-			ProductName: productName,
+			ProductName: p.Name,
 			Quantity:    item.Quantity,
 			Subtotal:    subtotal,
 		})
@@ -123,13 +189,28 @@ func (r *postgresTransactionRepository) CreateTransaction(items []model.Checkout
 		return nil, err
 	}
 
-	for i := range details {
-		details[i].TransactionID = transactionID
-		_, err = tx.Exec("INSERT INTO transaction_details (transaction_id, product_id, quantity, subtotal) VALUES ($1, $2, $3, $4)",
-			transactionID, details[i].ProductID, details[i].Quantity, details[i].Subtotal)
+	if len(details) > 0 {
+		insertArgs := make([]interface{}, 0, len(details)*4)
+		var insertQuery strings.Builder
+		insertQuery.WriteString("INSERT INTO transaction_details (transaction_id, product_id, quantity, subtotal) VALUES ")
+		argPos = 1
+		for i := range details {
+			if i > 0 {
+				insertQuery.WriteString(",")
+			}
+			insertQuery.WriteString(fmt.Sprintf("($%d::int, $%d::int, $%d::int, $%d::int)", argPos, argPos+1, argPos+2, argPos+3))
+			insertArgs = append(insertArgs, transactionID, details[i].ProductID, details[i].Quantity, details[i].Subtotal)
+			argPos += 4
+		}
+
+		_, err = tx.Exec(insertQuery.String(), insertArgs...)
 		if err != nil {
 			return nil, err
 		}
+	}
+
+	for i := range details {
+		details[i].TransactionID = transactionID
 	}
 
 	if err := tx.Commit(); err != nil {

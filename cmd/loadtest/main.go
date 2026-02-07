@@ -19,7 +19,7 @@ type Product struct {
 }
 
 func main() {
-	baseURL := flag.String("url", "https://kasir-api-xfuadi7395-bmt39rrk.leapcell.dev", "Base URL of the API")
+	baseURL := flag.String("url", "http://localhost:8080", "Base URL of the API")
 	totalRequests := flag.Int("n", 1000, "Total number of requests per endpoint")
 	concurrency := flag.Int("c", 100, "Number of concurrent workers")
 	debug := flag.Bool("debug", false, "Enable verbose error logging")
@@ -248,6 +248,27 @@ func runTest(baseURL, name, pathTmpl, method string, isDetail bool, ids []int, t
 func runPostTest(baseURL, name, path string, ids []int, totalReqs, concurrency int, debug bool) {
 	fmt.Printf("Testing %s (POST)...\n", name)
 
+	// First, restock all products to ensure sufficient inventory
+	fmt.Printf("Restocking products...\n")
+	products, err := restockProducts(baseURL)
+	if err != nil {
+		fmt.Printf("Error restocking products: %v\n", err)
+		return
+	}
+
+	if len(products) == 0 {
+		fmt.Printf("No products available for testing\n")
+		return
+	}
+
+	fmt.Printf("Restocked %d products with 1000 units each\n", len(products))
+
+	// Create a stock tracker to avoid exceeding available stock
+	stockTracker := make(map[int]int)
+	for _, p := range products {
+		stockTracker[p.ID] = p.Stock
+	}
+
 	var wg sync.WaitGroup
 	if totalReqs < concurrency {
 		concurrency = totalReqs
@@ -275,17 +296,54 @@ func runPostTest(baseURL, name, path string, ids []int, totalReqs, concurrency i
 			for j := 0; j < count; j++ {
 				// Create random checkout payload
 				numItems := rand.Intn(3) + 1 // 1-3 items per transaction
-				items := make([]map[string]interface{}, numItems)
-				
-				for k := 0; k < numItems; k++ {
-					if len(ids) > 0 {
-						productID := ids[rand.Intn(len(ids))]
-						quantity := rand.Intn(3) + 1 // 1-3 quantity
-						items[k] = map[string]interface{}{
-							"product_id": productID,
-							"quantity":   quantity,
+				items := make([]map[string]interface{}, 0, numItems)
+
+				// Track products used in this transaction to avoid duplicates
+				usedProducts := make(map[int]bool)
+
+				for k := 0; k < numItems && len(items) < numItems; k++ {
+					// Find a product with available stock
+					attempts := 0
+					for attempts < 10 {
+						productIdx := rand.Intn(len(products))
+						product := products[productIdx]
+
+						// Skip if already used in this transaction
+						if usedProducts[product.ID] {
+							attempts++
+							continue
 						}
+
+						mu.Lock()
+						availableStock := stockTracker[product.ID]
+						mu.Unlock()
+
+						if availableStock >= 1 {
+							// Calculate safe quantity (max 3 or available stock)
+							maxQty := 3
+							if availableStock < maxQty {
+								maxQty = availableStock
+							}
+							quantity := rand.Intn(maxQty) + 1
+
+							mu.Lock()
+							stockTracker[product.ID] -= quantity
+							mu.Unlock()
+
+							items = append(items, map[string]interface{}{
+								"product_id": product.ID,
+								"quantity":   quantity,
+							})
+							usedProducts[product.ID] = true
+							break
+						}
+						attempts++
 					}
+				}
+
+				if len(items) == 0 {
+					// No products with stock available, skip this request
+					continue
 				}
 
 				payload := map[string]interface{}{
@@ -347,4 +405,44 @@ func runPostTest(baseURL, name, path string, ids []int, totalReqs, concurrency i
 	fmt.Printf("  Failed: %d\n", failCount)
 	fmt.Printf("  RPS: %.2f\n", rps)
 	fmt.Println("------------------------------------------------")
+}
+
+func restockProducts(baseURL string) ([]Product, error) {
+	// Fetch current products
+	products, err := fetchProducts(baseURL + "/products")
+	if err != nil {
+		return nil, err
+	}
+
+	// Update each product's stock to 1000
+	for _, product := range products {
+		payload := map[string]interface{}{
+			"name":        fmt.Sprintf("Product-%d", product.ID),
+			"price":       1000,
+			"stock":       1000,
+			"category_id": 1,
+		}
+
+		jsonBody, err := json.Marshal(payload)
+		if err != nil {
+			continue
+		}
+
+		url := fmt.Sprintf("%s/products/%d", baseURL, product.ID)
+		req, err := http.NewRequest("PUT", url, bytes.NewBuffer(jsonBody))
+		if err != nil {
+			continue
+		}
+		req.Header.Set("Content-Type", "application/json")
+
+		client := &http.Client{Timeout: 10 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			continue
+		}
+		resp.Body.Close()
+	}
+
+	// Fetch updated products
+	return fetchProducts(baseURL + "/products")
 }
