@@ -2,43 +2,53 @@ package config
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/spf13/viper"
 )
 
 type Config struct {
-	Database DatabaseConfig `mapstructure:",squash"`
+	Database DatabaseConfig
 }
 
 type DatabaseConfig struct {
-	Host     string `mapstructure:"DB_HOST"`
-	Port     string `mapstructure:"DB_PORT"`
-	User     string `mapstructure:"DB_USER"`
-	Password string `mapstructure:"DB_PASSWORD"`
-	Name     string `mapstructure:"DB_NAME"`
+	Host     string
+	Port     string
+	User     string
+	Password string
+	Name     string
 }
 
 func LoadConfig() (*Config, error) {
-	viper.SetConfigName(".env")
-	viper.SetConfigType("env")
-	viper.AddConfigPath(".")
+	// Enable automatic environment variable reading
 	viper.AutomaticEnv()
-
-	// Replace dot separators with underscores for env vars if we were using nested keys like "database.host"
-	// But here we rely on existing flat env vars like DB_HOST
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 
-	if err := viper.ReadInConfig(); err != nil {
-		// Allow missing config file - env vars will be used instead
-		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
-			return nil, fmt.Errorf("failed to read config file: %w", err)
-		}
+	// Try to read .env file if it exists (for local development)
+	// On server environments like Leapcell, env vars are set directly
+	if _, err := os.Stat(".env"); err == nil {
+		viper.SetConfigFile(".env")
+		_ = viper.ReadInConfig() // Ignore error, env vars will be used as fallback
 	}
 
-	var config Config
-	if err := viper.Unmarshal(&config); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
+	// Build config directly from viper (works with both .env file and env vars)
+	config := Config{
+		Database: DatabaseConfig{
+			Host:     viper.GetString("DB_HOST"),
+			Port:     viper.GetString("DB_PORT"),
+			User:     viper.GetString("DB_USER"),
+			Password: viper.GetString("DB_PASSWORD"),
+			Name:     viper.GetString("DB_NAME"),
+		},
+	}
+
+	// Validate required fields
+	if config.Database.Host == "" {
+		return nil, fmt.Errorf("DB_HOST is required")
+	}
+	if config.Database.Port == "" {
+		config.Database.Port = "5432" // Default PostgreSQL port
 	}
 
 	return &config, nil
