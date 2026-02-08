@@ -28,7 +28,6 @@ import (
 // @license.name MIT
 // @license.url https://opensource.org/licenses/MIT
 
-// @host localhost:8080
 // @BasePath /
 
 func main() {
@@ -94,9 +93,14 @@ func main() {
 	mux.HandleFunc("/report", transactionHandler.HandleReport)
 	mux.HandleFunc("/report/", transactionHandler.HandleReport)
 
-	fmt.Println("Server starting on port 8080...")
-	fmt.Println("Swagger UI available at http://localhost:8080/swagger/index.html")
-	if err := http.ListenAndServe(":8080", mux); err != nil {
+	port := cfg.Server.Port
+	fmt.Printf("Server starting on port %s...\n", port)
+	fmt.Printf("Swagger UI available at /swagger/index.html\n")
+
+	// Wrap mux with CORS middleware
+	handlerWithCORS := enableCORS(mux)
+
+	if err := http.ListenAndServe(":"+port, handlerWithCORS); err != nil {
 		log.Fatalf("Server failed to start: %v", err)
 	}
 }
@@ -151,4 +155,23 @@ func runMigrations(db *sql.DB) error {
 	}
 
 	return nil
+}
+
+// enableCORS adds CORS headers to allow frontend access
+func enableCORS(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Set CORS headers
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.Header().Set("Access-Control-Max-Age", "86400")
+
+		// Handle preflight OPTIONS request
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
 }

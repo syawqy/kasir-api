@@ -82,7 +82,6 @@ definitions:
       total_transaksi:
         type: integer
     type: object
-host: localhost:8080
 info:
   contact:
     email: support@kasir-api.com

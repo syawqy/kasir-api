@@ -9,7 +9,12 @@ import (
 )
 
 type Config struct {
+	Server   ServerConfig
 	Database DatabaseConfig
+}
+
+type ServerConfig struct {
+	Port string
 }
 
 type DatabaseConfig struct {
@@ -34,6 +39,9 @@ func LoadConfig() (*Config, error) {
 
 	// Build config directly from viper (works with both .env file and env vars)
 	config := Config{
+		Server: ServerConfig{
+			Port: viper.GetString("SERVER_PORT"),
+		},
 		Database: DatabaseConfig{
 			Host:     viper.GetString("DB_HOST"),
 			Port:     viper.GetString("DB_PORT"),
@@ -41,6 +49,11 @@ func LoadConfig() (*Config, error) {
 			Password: viper.GetString("DB_PASSWORD"),
 			Name:     viper.GetString("DB_NAME"),
 		},
+	}
+
+	// Set defaults
+	if config.Server.Port == "" {
+		config.Server.Port = "8080" // Default server port
 	}
 
 	// Validate required fields
